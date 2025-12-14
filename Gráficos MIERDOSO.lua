@@ -12,22 +12,22 @@ local ShitMode = {
     noTextures = true,
     noEffects = true,
     noLights = true,
-    noSounds = false,  -- <- CAMBIADO A FALSE (SONIDOS ACTIVADOS)
-    lowPhysics = true,
-    maxFPS = 144,
-    destroyEverything = true
+    lowPhysics = true
 }
 
--- CONTADOR FPS LIGERO
+local fpsHistory = {}
+local minFPS = 999
+local lastFPSDrop = 0
 local fpsText = nil
+
 local function initFPS()
     local gui = Instance.new("ScreenGui")
-    gui.Name = "ShitFPS"
+    gui.Name = "StableFPS"
     gui.ResetOnSpawn = false
     gui.Parent = CoreGui
     
     local text = Instance.new("TextLabel")
-    text.Size = UDim2.new(0, 40, 0, 20)
+    text.Size = UDim2.new(0, 60, 0, 25)
     text.Position = UDim2.new(0, 2, 0, 2)
     text.BackgroundTransparency = 1
     text.TextColor3 = Color3.new(1, 1, 1)
@@ -46,30 +46,45 @@ local function initFPS()
         local now = tick()
         
         if now - last >= 0.5 then
-            local fps = math.floor(frames / (now - last))
+            local currentFPS = math.floor(frames / (now - last))
             frames = 0
             last = now
-            fpsText.Text = tostring(fps)
-        end
-    end)
-end
-
--- PROCESAMIENTO POR LOTES (ASYNC)
-local function processInBatches(objects, processFunc, batchSize)
-    batchSize = batchSize or 50
-    
-    spawn(function()
-        for i = 1, #objects, batchSize do
-            local batchEnd = math.min(i + batchSize - 1, #objects)
             
-            for j = i, batchEnd do
-                local obj = objects[j]
-                pcall(processFunc, obj)
+            table.insert(fpsHistory, currentFPS)
+            if #fpsHistory > 10 then table.remove(fpsHistory, 1) end
+            
+            minFPS = math.min(minFPS, currentFPS)
+            
+            local avgFPS = 0
+            for _, fps in ipairs(fpsHistory) do
+                avgFPS = avgFPS + fps
+            end
+            avgFPS = avgFPS / #fpsHistory
+            
+            if currentFPS < (avgFPS * 0.7) then
+                lastFPSDrop = now
+                fpsText.TextColor3 = Color3.new(1, 0.5, 0)
+                fpsText.Text = currentFPS .. "⚠️"
+            else
+                if currentFPS >= 100 then
+                    fpsText.TextColor3 = Color3.new(0, 1, 0)
+                elseif currentFPS >= 60 then
+                    fpsText.TextColor3 = Color3.new(1, 1, 0)
+                elseif currentFPS >= 30 then
+                    fpsText.TextColor3 = Color3.new(1, 0.5, 0)
+                else
+                    fpsText.TextColor3 = Color3.new(1, 0, 0)
+                end
+                fpsText.Text = currentFPS .. ""
             end
             
-            RunService.Heartbeat:Wait()
+            if now % 10 < 0.5 then
+                fpsText.Text = currentFPS .. "|" .. minFPS
+            end
         end
     end)
+    
+    return text
 end
 
 local function applyShitVisual(obj)
@@ -90,104 +105,146 @@ local function hideHitEffect(obj)
     if not obj:IsA("BasePart") then return end
     
     local name = obj.Name:lower()
-    if name:find("hit") or 
-       name:find("damage") or 
-       name:find("attack") or
-       name:find("effect") or
-       name:find("box") or
-       name:find("impact") or
-       name:find("blast") then
+    if name:find("hit") or name:find("damage") or name:find("attack") then
         obj.Transparency = 1
     end
 end
 
 local function destroyEffect(obj)
-    -- NO DESTRUIR SONIDOS
-    if obj:IsA("ParticleEmitter") or 
-       obj:IsA("Fire") or obj:IsA("Smoke") or
-       obj:IsA("Beam") or obj:IsA("Trail") or
-       obj:IsA("Sparkles") or obj:IsA("Explosion") or
-       obj:IsA("PointLight") or 
-       obj:IsA("SurfaceLight") or 
-       obj:IsA("SpotLight") or
-       obj:IsA("Texture") or 
-       obj:IsA("Decal") then
+    if obj:IsA("ParticleEmitter") then
+        obj:Destroy()
+    elseif obj:IsA("Fire") or obj:IsA("Smoke") then
         obj:Destroy()
     end
-    -- LOS SONIDOS NO SE DESTRUYEN
 end
 
--- CONFIGURACIONES RÁPIDAS
-local function quickSetup()
+local function fastOptimization()
+    local startTime = tick()
+    local count = 0
+    
     Lighting.Brightness = 1
     Lighting.GlobalShadows = false
     Lighting.Ambient = Color3.new(0.5, 0.5, 0.5)
     Lighting.OutdoorAmbient = Color3.new(0.5, 0.5, 0.5)
     
-    local toRemove = {}
     for _, child in ipairs(Lighting:GetChildren()) do
-        if child:IsA("PostEffect") or child:IsA("Atmosphere") or child:IsA("Sky") then
-            table.insert(toRemove, child)
+        if child:IsA("PostEffect") or child:IsA("Sky") then
+            child:Destroy()
         end
-    end
-    
-    for _, child in ipairs(toRemove) do
-        child:Destroy()
     end
     
     pcall(function()
         settings().Rendering.QualityLevel = 1
         settings().Physics.AllowSleep = true
     end)
-end
-
--- INICIALIZACIÓN OPTIMIZADA
-local function optimizedInit()
-    initFPS()
-    quickSetup()
     
-    local allObjects = workspace:GetDescendants()
-    local parts = {}
-    local effects = {}
-    
-    for _, obj in ipairs(allObjects) do
+    local objects = workspace:GetDescendants()
+    for i = 1, #objects do
+        local obj = objects[i]
+        
         if obj:IsA("BasePart") then
-            table.insert(parts, obj)
-        else
-            if not obj:IsA("Sound") then  -- Excluir sonidos
-                table.insert(effects, obj)
-            end
+            applyShitVisual(obj)
+            hideHitEffect(obj)
+            count = count + 1
+        elseif obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") then
+            destroyEffect(obj)
+            count = count + 1
+        end
+        
+        if i % 500 == 0 then
+            task.wait(0.001)
         end
     end
     
+    return count
+end
+
+local function backgroundOptimizations()
     spawn(function()
-        processInBatches(effects, destroyEffect, 100)
+        wait(3)
         
-        processInBatches(parts, function(obj)
-            applyShitVisual(obj)
-            hideHitEffect(obj)
-        end, 200)
-        
-        if fpsText then
-            fpsText.TextColor3 = Color3.new(0, 1, 0)
+        local meshCount = 0
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("MeshPart") then
+                obj.LODX = Enum.LevelOfDetail.Low
+                obj.LODY = Enum.LevelOfDetail.Low
+                meshCount = meshCount + 1
+                
+                if meshCount % 100 == 0 then
+                    wait(0.01)
+                end
+            end
         end
+        
+        pcall(function()
+            settings().Rendering.FramerateManagerMode = Enum.RenderFramerateManagerMode.Automatic
+            if settings().Rendering.EnableStreaming ~= nil then
+                settings().Rendering.EnableStreaming = false
+            end
+            Lighting.EnvironmentDiffuseScale = 0
+            Lighting.EnvironmentSpecularScale = 0
+        end)
     end)
+end
+
+local function setupAntiStutter()
+    local processingQueue = {}
+    local isProcessing = false
+    
+    local function processQueue()
+        if isProcessing or #processingQueue == 0 then return end
+        isProcessing = true
+        
+        spawn(function()
+            while #processingQueue > 0 do
+                local obj = table.remove(processingQueue, 1)
+                
+                if obj and obj.Parent then
+                    if obj:IsA("BasePart") then
+                        applyShitVisual(obj)
+                        hideHitEffect(obj)
+                    elseif obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") then
+                        destroyEffect(obj)
+                    end
+                end
+                
+                if #processingQueue % 10 == 0 then
+                    RunService.RenderStepped:Wait()
+                end
+            end
+            
+            isProcessing = false
+        end)
+    end
     
     workspace.DescendantAdded:Connect(function(obj)
-        if obj:IsA("BasePart") then
-            spawn(function()
-                applyShitVisual(obj)
-                hideHitEffect(obj)
-            end)
-        elseif not obj:IsA("Sound") then  -- Sonidos permitidos
-            spawn(function()
-                destroyEffect(obj)
-            end)
+        table.insert(processingQueue, obj)
+        processQueue()
+    end)
+end
+
+local function setupSmartGC()
+    spawn(function()
+        while true do
+            wait(30)
+            
+            local currentFPS = tonumber(string.match(fpsText.Text or "60", "%d+")) or 60
+            if currentFPS < 45 then
+                pcall(function()
+                    if game:GetService("Stats") then
+                        game:GetService("Stats"):RequestGC()
+                    end
+                end)
+            end
         end
     end)
 end
 
-optimizedInit()
+initFPS()
+local processed = fastOptimization()
+backgroundOptimizations()
+setupAntiStutter()
+setupSmartGC()
 
 _G.ToggleShitMode = function()
     ShitMode.enabled = not ShitMode.enabled
@@ -195,24 +252,36 @@ end
 
 _G.BoostFPS = function()
     spawn(function()
-        local parts = {}
+        local count = 0
         for _, obj in ipairs(workspace:GetDescendants()) do
             if obj:IsA("BasePart") then
-                table.insert(parts, obj)
+                applyShitVisual(obj)
+                count = count + 1
+                
+                if count % 200 == 0 then
+                    wait(0.001)
+                end
             end
         end
-        processInBatches(parts, applyShitVisual, 200)
     end)
 end
 
-_G.HideHitEffects = function()
-    spawn(function()
-        local parts = {}
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("BasePart") then
-                table.insert(parts, obj)
-            end
+_G.ForceStable = function()
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("ParticleEmitter") then
+            obj:Destroy()
         end
-        processInBatches(parts, hideHitEffect, 200)
+    end
+    
+    pcall(function()
+        settings().Rendering.QualityLevel = 1
     end)
+end
+
+_G.GetFPSStats = function()
+    return {
+        current = tonumber(string.match(fpsText.Text or "0", "%d+")) or 0,
+        min = minFPS,
+        lastDrop = lastFPSDrop > 0 and tick() - lastFPSDrop or 0
+    }
 end
